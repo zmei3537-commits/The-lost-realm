@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>The Lost Realm - RPG</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{overscroll-behavior:none} body{margin:0;background:#111827;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;display:flex;justify-content:center}
+  #game{width:min(900px,100%);min-height:100vh;padding:18px}
+  h1{margin:0 0 8px;font-size:28px}
+  .sub{color:#94a3b8;margin-bottom:14px}
+  .panel{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:14px;margin-bottom:12px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .stat{background:#0f172a;border-radius:10px;padding:10px;text-align:center}
+  .bar{height:8px;background:#334155;border-radius:8px;overflow:hidden;margin-top:6px}
+  .fill{height:100%;width:50%}
+  #hpFill{background:#ef4444} #mpFill{background:#3b82f6} #xpFill{background:#eab308}
+  #map{display:grid;grid-template-columns:repeat(9,1fr);gap:3px;max-width:520px;margin:auto}
+  .tile{aspect-ratio:1;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:22px}
+  .grass{background:#31572c}.tree{background:#1f3b25}.water{background:#164e63}
+  .town{background:#76552f}.dungeon{background:#3f3f46}.player{outline:3px solid #f8fafc}
+  .controls{display:grid;grid-template-columns:repeat(3,68px);gap:8px;justify-content:center;margin-top:14px}.controls button{font-size:22px}
+  button{border:0;border-radius:12px;background:#475569;color:white;padding:14px 12px;cursor:pointer;font-weight:700;font-size:15px;min-height:50px;touch-action:manipulation}
+  button:hover{background:#64748b} button:disabled{opacity:.4;cursor:not-allowed}
+  .actions{display:flex;flex-wrap:wrap;gap:8px}
+  #log{height:130px;overflow:auto;background:#0f172a;border-radius:10px;padding:10px;line-height:1.6}
+  .enemy{font-size:48px;text-align:center}
+  .hidden{display:none}
+  .gold{color:#facc15}
+  @media(max-width:600px){#game{padding:10px;padding-bottom:calc(18px + env(safe-area-inset-bottom))}h1{font-size:24px}.stats{grid-template-columns:repeat(2,1fr)}.tile{font-size:17px}.controls{grid-template-columns:repeat(3,68px)}.actions button{flex:1 1 calc(50% - 8px)}}
+</style>
+</head>
+<body>
+<div id="game">
+  <h1>⚔️ The Lost Realm</h1>
+  <div class="sub">一個小型回合制 RPG 原型</div>
+
+  <div class="panel stats">
+    <div class="stat">❤️ HP <b id="hp"></b><div class="bar"><div id="hpFill" class="fill"></div></div></div>
+    <div class="stat">💙 MP <b id="mp"></b><div class="bar"><div id="mpFill" class="fill"></div></div></div>
+    <div class="stat">⭐ Lv.<b id="lv"></b><div class="bar"><div id="xpFill" class="fill"></div></div></div>
+    <div class="stat">💰 <b id="gold"></b> G<br>⚔️ ATK <b id="atk"></b></div>
+  </div>
+
+  <div class="panel">
+    <div id="map"></div>
+    <div class="controls">
+      <span></span><button onclick="move(0,-1)">⬆️</button><span></span>
+      <button onclick="move(-1,0)">⬅️</button><button onclick="move(0,1)">⬇️</button><button onclick="move(1,0)">➡️</button>
+    </div>
+  </div>
+
+  <div id="battle" class="panel hidden">
+    <div class="enemy" id="enemyIcon">👾</div>
+    <h2 id="enemyName" style="text-align:center;margin:4px"></h2>
+    <div style="text-align:center">HP <b id="enemyHp"></b> / <b id="enemyMaxHp"></b></div>
+    <div class="actions" style="margin-top:12px">
+      <button onclick="attack()">🗡️ 普通攻擊</button>
+      <button onclick="skill()">✨ 火焰斬（5 MP）</button>
+      <button onclick="defend()">🛡️ 防禦</button>
+      <button onclick="potion()">🧪 喝藥水</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <b>📜 冒險紀錄</b>
+    <div id="log"></div>
+  </div>
+
+  <div class="panel">
+    <b>🎒 背包</b>：🧪 藥水 × <span id="potions"></span>
+    <p style="color:#94a3b8;margin-bottom:0">提示：走進森林可能遇到敵人；走到 🏰 可以恢復 HP/MP。</p>
+  </div>
+</div>
+
+<script>
+const map=[
+"TTTTTTTTT",
+"TGGGGGGGT",
+"TGGGWWGGT",
+"TGGGGGGGT",
+"TGGGCGGGT",
+"TGGGGGGGT",
+"TGGGGGGGT",
+"TGGGGGGGT",
+"TTTTTTTTT"
+];
+let px=1,py=1;
+let p={hp:100,maxHp:100,mp:30,maxMp:30,lv:1,xp:0,next:40,gold:20,atk:12,potions:3};
+let enemy=null, guarding=false;
+
+const $=id=>document.getElementById(id);
+function log(s){$("log").innerHTML+="<div>"+s+"</div>";$("log").scrollTop=$("log").scrollHeight}
+function render(){
+  $("map").innerHTML="";
+  for(let y=0;y<9;y++)for(let x=0;x<9;x++){
+    let c=map[y][x], d=document.createElement("div"); d.className="tile ";
+    d.className+=c==="T"?"tree":c==="W"?"water":c==="C"?"town":"grass";
+    d.textContent=c==="T"?"🌲":c==="W"?"💧":c==="C"?"🏰":"";
+    if(x===px&&y===py){d.classList.add("player");d.textContent="🧙"}
+    $("map").appendChild(d);
+  }
+  $("hp").textContent=`${p.hp}/${p.maxHp}`;$("mp").textContent=`${p.mp}/${p.maxMp}`;
+  $("lv").textContent=p.lv;$("gold").textContent=p.gold;$("atk").textContent=p.atk;
+  $("potions").textContent=p.potions;
+  $("hpFill").style.width=(p.hp/p.maxHp*100)+"%";
+  $("mpFill").style.width=(p.mp/p.maxMp*100)+"%";
+  $("xpFill").style.width=(p.xp/p.next*100)+"%";
+}
+function move(dx,dy){
+ if(enemy)return;
+ let nx=px+dx,ny=py+dy;
+ if(nx<0||nx>=9||ny<0||ny>=9||map[ny][nx]==="T"||map[ny][nx]==="W"){log("🧱 這裡走不過去。");return}
+ px=nx;py=ny;render();
+ if(map[py][px]==="C"){p.hp=p.maxHp;p.mp=p.maxMp;log("🏰 你回到村莊，HP 與 MP 全部恢復！");render();return}
+ if(Math.random()<0.28){startBattle();}
+}
+function startBattle(){
+ const list=[
+  ["史萊姆","🟢",35,7,15],["哥布林","👹",48,9,22],["暗影狼","🐺",60,11,30]
+ ];
+ let e=list[Math.floor(Math.random()*list.length)];
+ enemy={name:e[0],icon:e[1],hp:e[2],maxHp:e[2],atk:e[3],xp:e[4]};
+ $("battle").classList.remove("hidden"); updateBattle();
+ log(`⚠️ ${enemy.icon} ${enemy.name} 出現了！`);
+}
+function updateBattle(){
+ if(!enemy)return;
+ $("enemyName").textContent=enemy.name;$("enemyIcon").textContent=enemy.icon;
+ $("enemyHp").textContent=enemy.hp;$("enemyMaxHp").textContent=enemy.maxHp;
+}
+function enemyTurn(){
+ if(!enemy)return;
+ let dmg=Math.max(1,enemy.atk-Math.floor(Math.random()*5));
+ if(guarding)dmg=Math.ceil(dmg/2);
+ p.hp-=dmg; guarding=false;
+ log(`💥 ${enemy.name} 攻擊，你受到 ${dmg} 點傷害！`);
+ if(p.hp<=0){p.hp=1;enemy=null;$("battle").classList.add("hidden");log("💫 你倒下了……村莊的治療師救了你。");px=1;py=1;render();return}
+ render();
+}
+function attack(){
+ if(!enemy)return;
+ let dmg=p.atk+Math.floor(Math.random()*7);
+ enemy.hp-=dmg;log(`🗡️ 你造成 ${dmg} 點傷害！`);
+ if(enemy.hp<=0){winBattle();return} updateBattle();enemyTurn();updateBattle();
+}
+function skill(){
+ if(!enemy)return;
+ if(p.mp<5){log("💙 MP 不足！");return}
+ p.mp-=5;let dmg=p.atk+12+Math.floor(Math.random()*8);
+ enemy.hp-=dmg;log(`✨ 火焰斬造成 ${dmg} 點傷害！`);
+ if(enemy.hp<=0){winBattle();return} updateBattle();enemyTurn();
+}
+function defend(){if(!enemy)return;guarding=true;log("🛡️ 你進入防禦姿態。");enemyTurn()}
+function potion(){
+ if(!enemy)return;
+ if(p.potions<=0){log("🧪 沒有藥水了！");return}
+ p.potions--;let heal=30;p.hp=Math.min(p.maxHp,p.hp+heal);
+ log(`🧪 你恢復了 ${heal} HP。`);render();enemyTurn();
+}
+function winBattle(){
+ let e=enemy;p.gold+=Math.floor(e.xp/2)+3;p.xp+=e.xp;
+ log(`🏆 擊敗 ${e.name}！+${e.xp} EXP、+${Math.floor(e.xp/2)+3} G`);
+ enemy=null;$("battle").classList.add("hidden");
+ while(p.xp>=p.next){
+   p.xp-=p.next;p.lv++;p.next=Math.floor(p.next*1.45);
+   p.maxHp+=18;p.maxMp+=6;p.atk+=4;p.hp=p.maxHp;p.mp=p.maxMp;
+   log(`🎉 升級！你現在是 Lv.${p.lv}！能力值提升，HP/MP 已恢復。`);
+ }
+ render();
+}
+render();log("🌄 你醒來時，發現自己身處失落王國的邊境。");
+log("📜 村長的最後一句話：「森林深處，藏著王國失落的秘密……」");
+</script>
+</body>
+</html>
